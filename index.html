@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>EdgeLab — Single-File Betting Workbench (Educational)</title>
+  <meta name="description" content="Private football betting workbench for learning: odds → probability → EV → Kelly sizing. Single-file app we can keep editing."/>
+  <style>
+    :root { --bg:#f6f7f8; --card:#fff; --text:#111827; --muted:#6b7280; --accent:#10b981; --border:#e5e7eb; --danger:#ef4444 }
+    html, body { margin:0; padding:0; background:var(--bg); color:var(--text); font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif }
+    .container { max-width: 1140px; margin: 0 auto; padding: 16px }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 1px 1px rgba(0,0,0,0.04) }
+    .card-header { padding: 14px 16px; border-bottom: 1px solid var(--border); display:flex; gap:8px; align-items:center; justify-content:space-between }
+    .card-title { font-size: 16px; font-weight: 600 }
+    .card-body { padding: 16px }
+    .grid { display:grid; gap:16px }
+    @media (min-width: 980px) { .grid-12 { grid-template-columns: repeat(12, minmax(0, 1fr)); } }
+    .col-4 { grid-column: span 12; } @media(min-width:980px){ .col-4{ grid-column: span 4 } }
+    .col-8 { grid-column: span 12; } @media(min-width:980px){ .col-8{ grid-column: span 8 } }
+    .row { display:flex; gap:8px; align-items:center; flex-wrap: wrap }
+    .muted { color:var(--muted); font-size: 12px }
+    .banner { background:#fffbeb; border-bottom:1px solid #fef3c7 }
+    input[type='text'], input[type='number'] { width: 100%; height:36px; border-radius:10px; border:1px solid var(--border); padding:0 10px; outline:none }
+    input[type='number']::-webkit-outer-spin-button, input[type='number']::-webkit-inner-spin-button { -webkit-appearance:none; margin:0 }
+    .btn { height:36px; border-radius:10px; border:1px solid var(--border); background:#fff; padding:0 12px; cursor:pointer }
+    .btn.primary { background:var(--text); color:#fff; border-color:var(--text) }
+    .btn.ghost { background:transparent }
+    .btn.danger { border-color: var(--danger); color: var(--danger) }
+    table { width:100%; border-collapse: collapse }
+    th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--border) }
+    .pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px }
+    .pill.ok { background:#d1fae5; color:#065f46 }
+    .pill.no { background:#f3f4f6; color:#374151 }
+    .green { color:#065f46 }
+    .mb-8 { margin-bottom: 8px } .mt-8 { margin-top: 8px } .w-80{width:80px} .w-100{width:100px} .w-140{width:140px}
+  </style>
+</head>
+<body>
+  <header class="banner">
+    <div class="container" style="padding:10px 16px; display:flex; flex-direction:column; gap:6px">
+      <div style="font-weight:600">EdgeLab — Single-File Workbench (Educational)</div>
+      <div class="muted">This page is for <b>learning</b>. Sports betting may be illegal where you are. This app does <b>not</b> place bets.</div>
+    </div>
+  </header>
+
+  <main class="container">
+    <div class="grid grid-12">
+      <!-- Settings -->
+      <div class="card col-4">
+        <div class="card-header">
+          <div class="card-title">Bankroll & Sizing</div>
+          <button id="saveState" class="btn" style="height:30px">Save</button>
+        </div>
+        <div class="card-body">
+          <div class="row mb-8"><label class="w-140">Currency</label><input id="currency" type="text" value="$" class="w-80"/></div>
+          <div class="row mb-8"><label class="w-140">Bankroll</label><input id="bankroll" type="number" value="1000"/></div>
+          <div class="row mb-8"><label class="w-140">Kelly fraction</label><input id="kelly" type="number" step="0.05" value="0.25"/></div>
+          <div class="row mb-8"><label class="w-140">Per-bet cap</label><input id="cap" type="number" step="0.005" value="0.02"/></div>
+          <div class="row mt-8">
+            <button id="exportState" class="btn">Export data</button>
+            <label class="btn ghost" for="importStateInput">Import data</label>
+            <input id="importStateInput" type="file" accept="application/json" style="display:none"/>
+            <button id="resetState" class="btn danger">Reset</button>
+          </div>
+          <div id="totals" class="muted mt-8">Total stake: $0.00 (0 outcomes)</div>
+        </div>
+      </div>
+
+      <!-- Main calculator -->
+      <div class="card col-8">
+        <div class="card-header">
+          <div class="card-title">Odds → EV → Stake</div>
+          <div class="row"><button class="btn" id="add">+ Add Fixture</button><button class="btn" id="applyElo">Auto-fill probs (Elo)</button></div>
+        </div>
+        <div class="card-body">
+          <div id="fixtures"></div>
+          <div style="overflow:auto; margin-top:12px">
+            <table id="results">
+              <thead><tr><th>Fixture</th><th>Market p(H/D/A)</th><th>My p(H/D/A)</th><th>EV% (H/D/A)</th><th>Stake (H/D/A)</th><th>Decision</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Elo Trainer -->
+    <div class="card mt-8">
+      <div class="card-header">
+        <div class="card-title">Elo Trainer (CSV upload)</div>
+        <div class="muted">CSV columns: Date, HomeTeam, AwayTeam, FTHG, FTAG</div>
+      </div>
+      <div class="card-body">
+        <div class="row"><input id="csvFile" type="file" accept=".csv"/><button id="trainElo" class="btn primary">Train Elo</button><div id="eloSummary" class="muted">No data loaded yet.</div></div>
+      </div>
+    </div>
+
+    <div class="muted" style="margin-top:12px">We’ll keep editing this <b>single file</b> until you’re happy with the final product.</div>
+  </main>
+
+  <script>
+  // Utilities
+  const clamp=(n,min=0,max=1)=>Math.max(min,Math.min(max,n));
+  const fmtPct=x=>isFinite(x)?(x*100).toFixed(2)+'%':'-';
+  const fmtMoney=(x,c='$')=>isFinite(x)?c+x.toFixed(2):'-';
+  const implied=o=>o>0?1/o:0;
+  const normalize=ps=>{const s=ps.reduce((a,b)=>a+b,0);return s>0?ps.map(p=>p/s):ps};
+  const ev=(p,o)=>p*o-1;
+  const kellyFull=(p,o)=>{const b=o-1,q=1-p,n=b*p-q;if(b<=0)return 0;return Math.max(0,n/b)};
+  const fracKelly=(bankroll,p,o,kf=0.25,cap=0.02)=>{const full=kellyFull(p,o);const used=kf*full;const capped=Math.min(used,cap);return{full,used,capped,stake:bankroll*capped}};
+
+  // CSV parser
+  function parseCSV(text){const lines=text.replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n').filter(Boolean);const header=lines.shift().split(',').map(h=>h.trim());return lines.map(line=>{const cells=line.split(',').map(x=>x.trim());const obj={};header.forEach((h,i)=>obj[h]=cells[i]);return obj;});}
+
+  // App state
+  const state={currency:'$',bankroll:1000,kelly:0.25,cap:0.02,fixtures:[],eloParams:{k:20,hfa:70,scale:400,base_draw:0.25,d_scale:500},ratings:{}};
+  const LSKEY='edgelab_v1_state';
+  function loadState(){const raw=localStorage.getItem(LSKEY);if(!raw)return;try{Object.assign(state,JSON.parse(raw));}catch{}}
+  function saveState(){localStorage.setItem(LSKEY,JSON.stringify(state));}
+  function exportState(){const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='edgelab-state.json';a.click();URL.revokeObjectURL(url);}
+  function resetState(){localStorage.removeItem(LSKEY);location.reload();}
+
+  // Elo
+  const logistic=(x,scale=400)=>1/(1+Math.pow(10,-x/scale));
+  const outcomeTriple=(hg,ag)=>hg>ag?'H':(hg<ag?'A':'D');
+  function matchProbs(rHome,rAway,params){const{hfa,scale,base_draw,d_scale}=params;const diff=(rHome+hfa)-rAway;const ws=logistic(diff,scale);const pD=base_draw*Math.exp(-Math.abs(diff)/d_scale);const rem=1-pD;let pH=rem*ws,pA=rem*(1-ws);const s=pH+pD+pA;return{pH:pH/s,pD,pA:pA/s,diff}}
+  function marginMult(hg,ag){const gd=Math.abs(hg-ag);return gd<=1?1:Math.log(1+gd)}
+  function updateElo(rH,rA,hg,ag,params){const{k,hfa,scale}=params;const diff=(rH+hfa)-rA;const eH=logistic(diff,scale);const sH=hg>ag?1:(hg===ag?0.5:0);const mult=marginMult(hg,ag);return [rH+k*mult*(sH-eH), rA+k*mult*((1-sH)-(1-eH))];}
+  function trainEloFromRows(rows,params){const teams=new Set();rows.forEach(r=>{teams.add(r.HomeTeam);teams.add(r.AwayTeam)});const ratings={};teams.forEach(t=>ratings[t]=1500);rows.sort((a,b)=>new Date(a.Date)-new Date(b.Date));let logloss=0;for(const r of rows){const h=r.HomeTeam,a=r.AwayTeam,hg=+r.FTHG,ag=+r.FTAG;const{pH,pD,pA}=matchProbs(ratings[h],ratings[a],params);const y=outcomeTriple(hg,ag);const p=y==='H'?pH:(y==='D'?pD:pA);logloss+=-Math.log(Math.max(p,1e-12));const[nH,nA]=updateElo(ratings[h],ratings[a],hg,ag,params);ratings[h]=nH;ratings[a]=nA;}return{ratings,logloss};}
+
+  // DOM helpers
+  const $=s=>document.querySelector(s);
+  function renderFixtures(){const box=$('#fixtures');box.innerHTML='';state.fixtures.forEach(f=>{const wrap=document.createElement('div');wrap.className='card mb-8';wrap.innerHTML=`<div class="card-body">
+    <div class="row mb-8"><input type="text" class="w-140" value="${f.homeTeam}" data-k="homeTeam"/><span class="muted">vs</span><input type="text" class="w-140" value="${f.awayTeam}" data-k="awayTeam"/><button class="btn danger" data-act="remove">Delete</button></div>
+    <div class="row mb-8"><input type="number" step="0.01" class="w-100" value="${f.homeOdds}" data-k="homeOdds"/><input type="number" step="0.01" class="w-100" value="${f.drawOdds}" data-k="drawOdds"/><input type="number" step="0.01" class="w-100" value="${f.awayOdds}" data-k="awayOdds"/><span class="muted">Odds H / D / A</span></div>
+    <div class="row"><input type="number" step="0.001" class="w-100" value="${f.myPH}" data-k="myPH"/><input type="number" step="0.001" class="w-100" value="${f.myPD}" data-k="myPD"/><input type="number" step="0.001" class="w-100" value="${f.myPA}" data-k="myPA"/><button class="btn" data-act="rebalance">Rebalance 100%</button><span class="muted">My p(H/D/A)</span></div>
+  </div>`;wrap.querySelectorAll('input').forEach(inp=>{inp.addEventListener('input',()=>{const key=inp.getAttribute('data-k');let val=inp.type==='number'?Number(inp.value):inp.value;if(['myPH','myPD','myPA'].includes(key))val=clamp(val||0);const i=state.fixtures.findIndex(x=>x.id===f.id);state.fixtures[i][key]=val;renderResults();});});wrap.querySelector('[data-act="rebalance"]').addEventListener('click',()=>{const i=state.fixtures.findIndex(x=>x.id===f.id);const n=normalize([state.fixtures[i].myPH,state.fixtures[i].myPD,state.fixtures[i].myPA]);state.fixtures[i].myPH=n[0];state.fixtures[i].myPD=n[1];state.fixtures[i].myPA=n[2];renderFixtures();renderResults();});wrap.querySelector('[data-act="remove"]').addEventListener('click',()=>{state.fixtures=state.fixtures.filter(x=>x.id!==f.id);renderFixtures();renderResults();});box.appendChild(wrap);});}
+  function compute(){const B=state.bankroll,kf=state.kelly,cap=state.cap,c=state.currency;let total=0,out=0;const rows=state.fixtures.map(f=>{const m=normalize([implied(+f.homeOdds),implied(+f.drawOdds),implied(+f.awayOdds)]);const eH=ev(+f.myPH,+f.homeOdds),eD=ev(+f.myPD,+f.drawOdds),eA=ev(+f.myPA,+f.awayOdds);const sH=fracKelly(B,+f.myPH,+f.homeOdds,kf,cap),sD=fracKelly(B,+f.myPD,+f.drawOdds,kf,cap),sA=fracKelly(B,+f.myPA,+f.awayOdds,kf,cap);const bet=(e,s)=>e>0&&s.stake>0;if(bet(eH,sH)){total+=sH.stake;out++}if(bet(eD,sD)){total+=sD.stake;out++}if(bet(eA,sA)){total+=sA.stake;out++}return{f,market:m,ev:{H:eH,D:eD,A:eA},stakes:{H:sH,D:sD,A:sA},c};});document.getElementById('totals').textContent=`Total stake: ${fmtMoney(total,state.currency)} (${out} outcomes)`;return rows;}
+  function renderResults(){const tbody=document.querySelector('#results tbody');tbody.innerHTML='';const rows=compute();rows.forEach(({f,market,ev,stakes,c})=>{const any=(ev.H>0&&stakes.H.stake>0)||(ev.D>0&&stakes.D.stake>0)||(ev.A>0&&stakes.A.stake>0);const tr=document.createElement('tr');tr.style.background=any?'#ecfdf5':'transparent';tr.innerHTML=`<td>${f.homeTeam||'Home'} vs ${f.awayTeam||'Away'}</td>
+      <td>${fmtPct(market[0])} / ${fmtPct(market[1])} / ${fmtPct(market[2])}</td>
+      <td>${fmtPct(f.myPH)} / ${fmtPct(f.myPD)} / ${fmtPct(f.myPA)}</td>
+      <td><div><div ${ev.H>0?'class="green"':''}>H: ${(ev.H*100).toFixed(2)}%</div><div ${ev.D>0?'class="green"':''}>D: ${(ev.D*100).toFixed(2)}%</div><div ${ev.A>0?'class="green"':''}>A: ${(ev.A*100).toFixed(2)}%</div></div></td>
+      <td><div><div ${ev.H>0?'class="green"':''}>H: ${fmtMoney(stakes.H.stake,c)}</div><div ${ev.D>0?'class="green"':''}>D: ${fmtMoney(stakes.D.stake,c)}</div><div ${ev.A>0?'class="green"':''}>A: ${fmtMoney(stakes.A.stake,c)}</div></div></td>
+      <td>${any?'<span class="pill ok">BET selective</span>':'<span class="pill no">NO BET</span>'}</td>`;tbody.appendChild(tr);});}
+  function renderSettings(){document.getElementById('currency').value=state.currency;document.getElementById('bankroll').value=state.bankroll;document.getElementById('kelly').value=state.kelly;document.getElementById('cap').value=state.cap;}
+  function addFixture(obj){const row=Object.assign({id:crypto.randomUUID(),homeTeam:'Alpha FC',awayTeam:'Gamma City',homeOdds:2.2,drawOdds:3.4,awayOdds:3.6,myPH:0.48,myPD:0.27,myPA:0.25},obj||{});state.fixtures.push(row);renderFixtures();renderResults();}
+  function applyEloToFixtures(){if(!Object.keys(state.ratings).length){alert('Train Elo first (upload CSV and click Train Elo).');return;}for(const f of state.fixtures){const rH=state.ratings[f.homeTeam]??1500;const rA=state.ratings[f.awayTeam]??1500;const {pH,pD,pA}=matchProbs(rH,rA,state.eloParams);f.myPH=pH;f.myPD=pD;f.myPA=pA;}renderFixtures();renderResults();}
+  document.getElementById('currency').addEventListener('input',e=>{state.currency=e.target.value.slice(0,3);renderResults();});
+  document.getElementById('bankroll').addEventListener('input',e=>{state.bankroll=Number(e.target.value)||0;renderResults();});
+  document.getElementById('kelly').addEventListener('input',e=>{state.kelly=Number(e.target.value)||0;renderResults();});
+  document.getElementById('cap').addEventListener('input',e=>{state.cap=Number(e.target.value)||0;renderResults();});
+  document.getElementById('add').addEventListener('click',()=>addFixture());
+  document.getElementById('applyElo').addEventListener('click',applyEloToFixtures);
+  document.getElementById('saveState').addEventListener('click',()=>{saveState();alert('Saved locally.');});
+  document.getElementById('exportState').addEventListener('click',exportState);
+  document.getElementById('importStateInput').addEventListener('change',e=>{const file=e.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=()=>{try{Object.assign(state,JSON.parse(reader.result));renderSettings();renderFixtures();renderResults();alert('Imported.');}catch{alert('Invalid JSON.');}};reader.readAsText(file);});
+  document.getElementById('resetState').addEventListener('click',()=>{if(confirm('Reset everything?'))resetState();});
+  document.getElementById('trainElo').addEventListener('click',async()=>{const file=document.getElementById('csvFile').files[0];if(!file){alert('Choose a CSV first.');return;}const text=await file.text();const rows=parseCSV(text);const need=['Date','HomeTeam','AwayTeam','FTHG','FTAG'];for(const r of rows){for(const k of need){if(!(k in r)){alert('CSV missing column: '+k);return;}}}const {ratings,logloss}=trainEloFromRows(rows,state.eloParams);state.ratings=ratings;saveState();const teams=Object.keys(ratings).sort((a,b)=>ratings[b]-ratings[a]);const top=teams.slice(0,5).map(t=>t+': '+ratings[t].toFixed(1)).join(' · ');document.getElementById('eloSummary').textContent=`Teams: ${teams.length}. LogLoss: ${logloss.toFixed(2)}. Top: ${top}`;alert('Elo trained. Click “Auto-fill probs (Elo)”.');});
+  loadState();renderSettings();if(state.fixtures.length===0) addFixture(); else {renderFixtures();renderResults();}
+  </script>
+</body>
+</html>
